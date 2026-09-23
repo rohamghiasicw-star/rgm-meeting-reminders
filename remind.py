@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 ICS_URL      = os.environ["ICS_URL"]
 GMAIL_USER   = os.environ["GMAIL_USER"]
+REPLY_TO     = os.environ.get("REPLY_TO", "")
 GMAIL_PASS   = os.environ.get("GMAIL_APP_PASSWORD", "")
 
 # How to send. "composio" uses the OAuth Gmail connection (no app password, no 2FA).
@@ -183,6 +184,8 @@ def send_smtp(to_addr, subject, body):
     msg = EmailMessage()
     msg["From"] = GMAIL_USER
     msg["To"] = to_addr
+    if REPLY_TO:
+        msg["Reply-To"] = REPLY_TO
     msg["Subject"] = subject
     msg.set_content(body)
     with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as s:
