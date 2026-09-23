@@ -1,11 +1,9 @@
 name: meeting-reminders
 
+# Scheduling moved to launchd on the Mac (every 5 min). GitHub's free scheduler
+# only fired 3 times in 20 hours against a */15 cron, nowhere near precise enough
+# for a T-30 reminder. Kept here for manual dry-run testing only.
 on:
-  schedule:
-    # Every 15 min, 06:00-15:59 UTC. Covers the 09:00-15:00 UK booking window
-    # in both BST and GMT, with room for the T-75 lead time.
-    # 40 runs/day = ~1,200 min/month, inside the 2,000 free private-repo minutes.
-    - cron: "*/15 6-15 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
