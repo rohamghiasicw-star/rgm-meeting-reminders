@@ -1,39 +1,40 @@
 # RG Marketing meeting reminders
 
 Emails every Calendly invitee **1 hour** and **30 minutes** before their call.
-Free. No Calendly premium, no Zapier, no Claude, no server to maintain.
+Free, and it runs in the cloud, so the laptop can be shut.
 
 ## How it works
-GitHub Actions runs `remind.py` every 15 minutes during UK business hours.
-The script reads a Google Calendar secret iCal feed, finds calls starting soon,
-and emails the invitee from Roham's own Gmail over SMTP.
+Public repo, so GitHub Actions minutes are unlimited. Each run holds an **internal
+loop** that checks every 3 minutes for 5.5 hours; the `*/30` schedule only has to
+restart it. That matters because GitHub's bare cron is unreliable: a `*/15` schedule
+on this repo fired **3 times in 20 hours**. Same pattern as `rgm-lead-watcher`.
 
-`state/sent.json` records what has already gone out (keyed by event UID + stage)
-so nothing is ever sent twice, even if a run is delayed or retried.
+`remind.py` reads a Google Calendar secret iCal feed, finds calls starting soon, and
+emails the invitee from Roham's Gmail over SMTP.
 
-## The three secrets
-Set at **Settings -> Secrets and variables -> Actions**:
+## What it will and will not email
+Only events **Calendly created** (matched on `calendly.com` in the description).
+The live calendar carries 119 events; without that filter clients and internal
+meetings would get prospect reminders. Cancelled events are skipped.
 
-| `ICS_URL` | Google Calendar -> Settings -> *Settings for my calendars* -> your calendar -> **Integrate calendar** -> **Secret address in iCal format** |
-| `GMAIL_USER` | `rohamghiasicw@gmail.com` |
-| `GMAIL_APP_PASSWORD` | myaccount.google.com/apppasswords (needs 2FA on). 16 characters. NOT the normal Gmail password |
+## Secrets
+`ICS_URL`, `GMAIL_USER`, `GMAIL_APP_PASSWORD` in Actions secrets. Encrypted, and
+fork PRs never receive them.
 
 ## Timing
-| stage | fires when the call is | window |
-|---|---|---|
-| T-60 | about an hour out | 30-75 min before |
-| T-30 | about half an hour out | 0-35 min before |
+| stage | window |
+|---|---|
+| T-60 | 30 to 75 minutes before |
+| T-30 | 0 to 35 minutes before |
 
-Windows are deliberately wide. GitHub's scheduler drifts under load, so a late
-run still catches the reminder instead of skipping it. The state file stops
-the wide window causing duplicates.
+Wide on purpose. A late tick still catches the reminder; `state/sent.json` stops the
+width causing duplicates. State keys are sha256 hashed, so this public repo reveals
+nothing about the calendar.
 
-## Test it without sending anything
-Actions -> meeting-reminders -> **Run workflow** -> leave *dry run* ticked.
-The log prints the emails it would have sent.
+## Test without sending
+Actions -> meeting-reminders -> **Run workflow**, leave *dry run* ticked, set
+*minutes* to 2. The log prints what it would have sent.
 
-## Knobs
-- `INVITEE_TZ` in the workflow: fallback timezone when the calendar event does
-  not name one. Currently `Europe/London`.
-- `EVENT_MATCH` env var: only remind for events whose title contains this string.
-  Unset, so every calendar event with an outside attendee gets a reminder.
+## Local fallback
+`run-local.sh` + `com.rgm.reminders.plist` run the same engine under launchd, reading
+`~/.rgm-reminders.env`. Currently **unloaded** so the two schedulers cannot double-send.
