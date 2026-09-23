@@ -4,14 +4,21 @@ Automatic meeting reminders for RG Marketing.
 Reads a Google Calendar secret iCal feed, emails the invitee at T-60 and T-30.
 No Calendly premium, no Zapier, no Claude. Runs on GitHub Actions cron.
 """
-import os, re, ssl, json, smtplib, urllib.request, sys
+import os, re, ssl, json, smtplib, urllib.request, urllib.error, sys
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 ICS_URL      = os.environ["ICS_URL"]
 GMAIL_USER   = os.environ["GMAIL_USER"]
-GMAIL_PASS   = os.environ["GMAIL_APP_PASSWORD"]
+GMAIL_PASS   = os.environ.get("GMAIL_APP_PASSWORD", "")
+
+# How to send. "composio" uses the OAuth Gmail connection (no app password, no 2FA).
+# "smtp" is the fallback and needs GMAIL_APP_PASSWORD.
+SENDER       = os.environ.get("SENDER", "composio").lower()
+COMPOSIO_KEY = os.environ.get("COMPOSIO_API_KEY", "")
+COMPOSIO_ACC = os.environ.get("COMPOSIO_ACCOUNT_ID", "")
+COMPOSIO_URL = "https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL"
 INVITEE_TZ   = os.environ.get("INVITEE_TZ", "Europe/London")
 EVENT_MATCH  = os.environ.get("EVENT_MATCH", "")   # optional extra title filter
 ONLY_CALENDLY = os.environ.get("ONLY_CALENDLY", "1") == "1"
@@ -172,7 +179,7 @@ def save_state(st):
         json.dump(st, f, indent=1, sort_keys=True)
 
 
-def send(to_addr, subject, body):
+def send_smtp(to_addr, subject, body):
     msg = EmailMessage()
     msg["From"] = GMAIL_USER
     msg["To"] = to_addr
@@ -182,6 +189,42 @@ def send(to_addr, subject, body):
         s.starttls(context=ssl.create_default_context())
         s.login(GMAIL_USER, GMAIL_PASS)
         s.send_message(msg)
+
+
+def send_composio(to_addr, subject, body):
+    if not COMPOSIO_KEY:
+        raise RuntimeError("COMPOSIO_API_KEY is not set")
+    payload = {
+        "arguments": {
+            "recipient_email": to_addr,
+            "subject": subject,
+            "body": body,
+            "is_html": False,
+            "from_email": GMAIL_USER,
+        }
+    }
+    if COMPOSIO_ACC:
+        payload["connected_account_id"] = COMPOSIO_ACC
+    req = urllib.request.Request(
+        COMPOSIO_URL,
+        data=json.dumps(payload).encode(),
+        headers={"x-api-key": COMPOSIO_KEY, "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            out = json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Composio HTTP {e.code}: {e.read().decode()[:400]}")
+    if out.get("successful") is False or out.get("error"):
+        raise RuntimeError(f"Composio refused: {str(out.get('error'))[:400]}")
+    return out
+
+
+def send(to_addr, subject, body):
+    if SENDER == "smtp":
+        return send_smtp(to_addr, subject, body)
+    return send_composio(to_addr, subject, body)
 
 
 def main():
@@ -217,7 +260,11 @@ def main():
             if DRY_RUN:
                 print("---\n" + body + "---")
             else:
-                send(att["email"], subject, body)
+                try:
+                    send(att["email"], subject, body)
+                except Exception as exc:
+                    print(f"  SEND FAILED ({SENDER}): {exc}")
+                    continue
             state[key] = now.isoformat()
             sent += 1
 
