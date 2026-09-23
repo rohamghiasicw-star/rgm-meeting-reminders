@@ -1,45 +1,58 @@
 name: meeting-reminders
 
-# Scheduling moved to launchd on the Mac (every 5 min). GitHub's free scheduler
-# only fired 3 times in 20 hours against a */15 cron, nowhere near precise enough
-# for a T-30 reminder. Kept here for manual dry-run testing only.
+# GitHub's cron is unreliable on its own: a */15 schedule fired 3 times in 20 hours.
+# So each run holds an internal loop that checks every 3 minutes for 5.5 hours, and the
+# schedule just restarts it. Same pattern as rgm-lead-watcher. Public repo, so Actions
+# minutes are unlimited and a long-running loop costs nothing.
 on:
+  schedule:
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Print emails instead of sending"
         type: boolean
         default: true
+      minutes:
+        description: "How long to loop for"
+        default: "330"
 
 permissions:
   contents: write
 
 concurrency:
   group: reminders
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   remind:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 1 }
 
-      - name: Send due reminders
+      - name: Poll and send
         env:
           ICS_URL:            ${{ secrets.ICS_URL }}
           GMAIL_USER:         ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SENDER:             smtp
           INVITEE_TZ:         Europe/London
           DRY_RUN:            ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
-        run: python3 remind.py
-
-      - name: Remember what was sent
         run: |
-          if [ -n "$(git status --porcelain state/)" ]; then
-            git config user.name  "reminders-bot"
-            git config user.email "actions@github.com"
-            git add state/
-            git commit -m "state: reminders sent [skip ci]"
-            git push
-          fi
+          git config user.name  "reminders-bot"
+          git config user.email "actions@github.com"
+          MINS="${{ github.event.inputs.minutes || '330' }}"
+          END=$(( $(date +%s) + MINS * 60 ))
+          echo "looping until $(date -u -d "@$END" 2>/dev/null || date -u -r "$END")"
+          while [ "$(date +%s)" -lt "$END" ]; do
+            python3 remind.py || echo "run errored, continuing"
+            if [ -n "$(git status --porcelain state/)" ]; then
+              git add state/
+              git commit -q -m "state: reminder sent [skip ci]"
+              git pull --rebase -q || true
+              git push -q || echo "push failed, will retry next tick"
+            fi
+            sleep 180
+          done
+          echo "loop finished, schedule will restart it"

@@ -4,7 +4,7 @@ Automatic meeting reminders for RG Marketing.
 Reads a Google Calendar secret iCal feed, emails the invitee at T-60 and T-30.
 No Calendly premium, no Zapier, no Claude. Runs on launchd every 5 minutes.
 """
-import os, re, ssl, json, smtplib, urllib.request, urllib.error, sys
+import os, re, ssl, json, hashlib, smtplib, urllib.request, urllib.error, sys
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -255,7 +255,7 @@ def main():
         for stage, lo, hi in STAGES:
             if not (lo < mins <= hi):
                 continue
-            key = f"{ev.get('uid','?')}:{stage}"
+            key = hashlib.sha256(f"{ev.get('uid','?')}:{stage}".encode()).hexdigest()[:20]
             if key in state:
                 continue
             subject, body = build(stage, ev, att)
