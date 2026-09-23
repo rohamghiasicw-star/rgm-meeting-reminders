@@ -13,7 +13,8 @@ ICS_URL      = os.environ["ICS_URL"]
 GMAIL_USER   = os.environ["GMAIL_USER"]
 GMAIL_PASS   = os.environ["GMAIL_APP_PASSWORD"]
 INVITEE_TZ   = os.environ.get("INVITEE_TZ", "Europe/London")
-EVENT_MATCH  = os.environ.get("EVENT_MATCH", "")   # optional substring filter
+EVENT_MATCH  = os.environ.get("EVENT_MATCH", "")   # optional extra title filter
+ONLY_CALENDLY = os.environ.get("ONLY_CALENDLY", "1") == "1"
 DRY_RUN      = os.environ.get("DRY_RUN", "") == "1"
 STATE_PATH   = "state/sent.json"
 
@@ -97,10 +98,14 @@ def meeting_link(ev):
     return ev.get("location", "").strip()
 
 
+SELF = {e.strip().lower() for e in
+        (os.environ.get("SELF_EMAILS", "") + "," + GMAIL_USER).split(",") if e.strip()}
+
+
 def invitee(ev):
     """The attendee who is not Roham."""
     for a in ev["attendees"]:
-        if a["email"] and a["email"] != GMAIL_USER.lower():
+        if a["email"] and a["email"] not in SELF:
             return a
     return None
 
@@ -188,7 +193,14 @@ def main():
     for ev in parse_ics(raw):
         if not ev.get("start") or ev.get("status") == "CANCELLED":
             continue
-        if EVENT_MATCH and EVENT_MATCH.lower() not in ev.get("summary", "").lower():
+        summary = ev.get("summary", "")
+        if summary.lower().startswith(("canceled:", "cancelled:")):
+            continue
+        # Only Calendly-created bookings. Everything else on this calendar is a
+        # client meeting or an internal call and must never get a reminder.
+        if ONLY_CALENDLY and "calendly.com" not in ev.get("description", "").lower():
+            continue
+        if EVENT_MATCH and EVENT_MATCH.lower() not in summary.lower():
             continue
         mins = (ev["start"] - now).total_seconds() / 60.0
         att = invitee(ev)
