@@ -231,6 +231,13 @@ def send(to_addr, subject, body):
 
 
 def main():
+    test_to = os.environ.get("TEST_TO", "").strip()
+    if test_to:
+        send(test_to, "RGM reminders: cloud send test",
+             "Sent from GitHub Actions using the live secrets.\n\n"
+             "If this landed, the cloud can email your prospects.\n")
+        print(f"cloud test email sent to {test_to} via {SENDER}")
+        return
     raw = urllib.request.urlopen(ICS_URL, timeout=45).read().decode("utf-8", "replace")
     now = datetime.now(timezone.utc)
     state = load_state()

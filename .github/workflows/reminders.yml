@@ -16,6 +16,9 @@ on:
       minutes:
         description: "How long to loop for"
         default: "330"
+      test_to:
+        description: "Send ONE test email to this address and stop"
+        default: ""
 
 permissions:
   contents: write
@@ -39,7 +42,9 @@ jobs:
           SENDER:             smtp
           INVITEE_TZ:         Europe/London
           DRY_RUN:            ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
+          TEST_TO:            ${{ github.event.inputs.test_to }}
         run: |
+          if [ -n "$TEST_TO" ]; then python3 remind.py; exit $?; fi
           git config user.name  "reminders-bot"
           git config user.email "actions@github.com"
           MINS="${{ github.event.inputs.minutes || '330' }}"
